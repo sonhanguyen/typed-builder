@@ -1,41 +1,61 @@
-//This will not run on deno, we need a separate test runner for Deno (./mod.ts).
+type ProfileBuilder<State = {}> = Builder<
+  {
+    email: TransitionFactory<
+      [string],
+      State, 
+      State & { email: string }
+    >
+    name: TransitionFactory<
+      [string, string],
+      State,
+      State & { names: { first: string, last: string } }
+    >
+  },
+  State
+>
 
-import * as child_process from "child_process";
-import * as path from "path";
-import { Deferred } from "evt/tools/Deferred";
+type Transition<From, To> = (state: From) => To
 
-const names = ["myFunction", "myObject", "getProjectRoot"];
+type TransitionFactory<
+  Params extends any[],
+  From,
+  To
+> = (...args: Params) => Transition<From, To>
 
-(async () => {
-    if (!!process.env.FORK) {
-        process.once("unhandledRejection", error => {
-            throw error;
-        });
+import { expectType } from 'tsd'
 
-        require(process.env.FORK);
+type GetMembers<T> = T extends Builder<infer M, any> ? M : {} 
 
-        return;
-    }
+declare const profileBuilder: ProfileBuilder
 
-    for (const name of names) {
-        console.log(`Running: ${name}`);
+expectType<{ email: string }>(
+  profileBuilder
+    .email('nsha@outlook.com')
+    .get()
+)
 
-        const dExitCode = new Deferred<number>();
+expectType<Builder<GetMembers<ProfileBuilder>, { email: string }>>(
+  profileBuilder.email('nsha@outlook.com')
+)
 
-        child_process
-            .fork(__filename, undefined, {
-                "env": { "FORK": path.join(__dirname, name) },
-            })
-            .on("message", console.log)
-            .once("exit", code => dExitCode.resolve(code ?? 1));
+expectType<{
+  email: string,
+  names: { first: 'Harry', 'Nguyen' }
+}>(
+  profileBuilder
+    .email('nsha@outlook.com')
+    .name('Harry', 'Nguyen')
+    .get()
+)
 
-        const exitCode = await dExitCode.pr;
+import { Dictionary } from 'lodash'
 
-        if (exitCode !== 0) {
-            console.log(`${name} exited with error code: ${exitCode}`);
-            process.exit(exitCode);
-        }
+type To<T extends TransitionFactory<any[], any, any>> =
+  ReturnType<ReturnType<T>>
 
-        console.log("\n");
-    }
-})();
+type Builder<
+  Members extends Dictionary<TransitionFactory<any[], State, any>>,
+  State,
+> =
+& { [K in keyof Members]: (...args: Parameters<Members[K]>) => Builder<Members, To<Members[K]> }
+& { get(): State }
