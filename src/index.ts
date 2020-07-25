@@ -1,59 +1,83 @@
-import { URIS2, URIS, Kind2, Kind } from 'fp-ts/lib/HKT'
+import { URIS, Kind } from 'fp-ts/lib/HKT'
 
-type $<T, P extends any[]> =
-  T extends URIS2 ?
-    Kind2<T, P[0], P[1]> :
-  T extends URIS ?
-    Kind<T, P[0]> :
-  T
+type Append<T extends any[], E> =
+E extends unknown ? T:
+T extends [infer A] ? [A, E] :
+T extends [infer A, infer B] ? [A, B, E] :
+T extends [infer A, infer B, infer C] ? [A, B, C, E] :
+T extends [infer A, infer B, infer C, infer D] ? [A, B, C, D, E] :
+'only support tuples upto 4 elements'
 
-export type Transition<P extends any[] = any[], F = any, T = any> = <A extends P>(..._: A) =>
-  <S extends F>(_: S) => $<T, [S, A]>
+export enum HKT { State, Name, Params }
 
-type Params<T extends Transition, S> = $<Parameters<T>, [S]>
+type $<T, Params extends any[]> = T extends [URIS, (infer Fixed)?] ? Kind<T[0], Append<Params, Fixed>> : T
+
+export type Transition<P extends any[] | URIS = any[], F = any, T = any> =
+  (...args: P extends any[] ? P : any[]) => (_: F) => T
+
+type Params<T extends Transition, S, K> = $<Parameters<T>, [S, K]>
 type From<T extends Transition> = Parameters<ReturnType<T>>[0]
-type To<T extends Transition, S, P> = $<ReturnType<ReturnType<T>>, [S, P]>
+type To<T extends Transition, S, K, P> = $<ReturnType<ReturnType<T>>, [S, K, P]>
 
 export type Builder<
-  Members extends Record<string, Transition>,
+  Transitions extends Record<string, Transition>,
   State = undefined,
-  BuildMethods extends keyof Members = never
-> = (BuildMethods extends never ? { (): State }: {}) & { 
-  [K in keyof Members]: State extends From<Members[K]>
-    ? <P extends Params<Members[K], State>>(...params: P) => (BuildMethods extends K 
-      ? To<Members[K], State, P>
+  Queries extends Transition | keyof Transitions = typeof merge
+> = (Queries extends Transition ? (
+  State extends From<Queries> ? {
+    <P extends Params<Queries, State, never>>(...params: P): To<Queries, State, never, P>
+  }: {})
+: {}) & { 
+  [K in keyof Transitions]: State extends From<Transitions[K]>
+    ? <P extends Params<Transitions[K], State, K>>(...params: P) => (K extends Queries
+      ? To<Transitions[K], State, K, P>
       : Builder<
-        Members,
-        To<Members[K], State, P>,
-        BuildMethods
+        Transitions,
+        To<Transitions[K], State, K, P>,
+        Queries
       >
     )
     : never
 }
 
-export const Patch = Symbol()
+export const Assign = Symbol()
+export const Merge = Symbol()
+export const Get = Symbol()
+
 declare module 'fp-ts/lib/HKT' {
-  interface URItoKind2<E, A> {
-    [Patch]: A extends [infer P] ? E & P : never
+  interface URItoKind<A> {
+    [Merge]: A extends [infer State, any, [ infer Patch ], (infer Fixed)?] ?
+      State & Fixed & Patch
+    : never
+    [Get]: A extends [infer State, any, [(infer CastTo)?]] ? (
+      unknown extends CastTo ? State : CastTo
+    ): never
+    [Assign]: A extends [infer State, string, [ infer Value ], (infer Fixed)?] ?
+      State & Fixed & Record<A[HKT.Name], Value>
+    : never
   }
 }
 
-export const configureBuilder = <
-  TransitionMembers extends Record<string, Transition> = typeof patch,
-  BuildMembers extends Record<string, Transition> = {},
+export const Builder = <
+  Transitions extends Record<string, Transition> = typeof defaultTransitions,
+  Queries extends Record<string, Transition> = {},
 >(
-  transitions: TransitionMembers = patch as any,
-  buildMembers: BuildMembers = {} as any
-): Builder<TransitionMembers & BuildMembers, void, keyof BuildMembers> => {
+  transitions: Transitions = defaultTransitions as any,
+  queries: Queries | Transition = get
+): Builder<
+  Transitions & Queries,
+  void,
+  Queries extends (..._: any[]) => any ? Queries : keyof Queries
+> => {
   const createBuilder = (getState: () => any) => {
-    const members = { ...transitions, ...buildMembers }
+    const members = { ...transitions, ...queries }
     const methods: any = {}
     
     Object
       .keys(members)
       .forEach(key => {
         const nextState = (...args: any[]) => members[key](...args)(getState())
-        methods[key] = key in buildMembers
+        methods[key] = key in queries
           ? nextState
           : (...args: any[]) => createBuilder(() => nextState(...args))
       })
@@ -63,9 +87,14 @@ export const configureBuilder = <
   
   return createBuilder(() => {})
 }
-  
-const patch = {
-  with: <Transition<any[], any, typeof Patch>>(<P extends any[]>(...[patch]: P) =>
-    <S>(state: S) => ({ ...state, ...patch })
-  )
-}
+
+export const merge: Transition<[any], any, [typeof Merge]> =
+  patch => (state = {} as any) => ({ ...state, ...patch })
+
+export const get: Transition<[any?], any, [typeof Get]> =
+  () => state => state as any
+
+export type Assignable<T> = Transition<[], T, T>
+export const Assignable = <T>(): Assignable<T> => get as any
+
+const defaultTransitions = { with: merge }
