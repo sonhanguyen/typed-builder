@@ -9,30 +9,30 @@ on:
 
 jobs:
 
-  test_lint:
-    runs-on: ubuntu-latest
-    if: ${{ !github.event.created }}
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-node@v1
-    - run: npm ci
-    - name: Making sure 'npm run lint' and 'npm run format' does not changes anything.
-      run: |
-        npm run lint:check
-        npm run format:check
+  # test_lint:
+  #   runs-on: ubuntu-latest
+  #   if: ${{ !github.event.created }}
+  #   steps:
+  #   - uses: actions/checkout@v2
+  #   - uses: actions/setup-node@v1
+  #   - run: npm ci
+  #   - name: Making sure 'npm run lint' and 'npm run format' does not changes anything.
+  #     run: |
+  #       npm run lint:check
+  #       npm run format:check
 
   test_node:
     runs-on: ubuntu-latest
-    needs: test_lint
-    strategy:
-      matrix:
-        node: [ '14', '13', '12', '11', '10', '8' ]
-    name: Test with Node v${{ matrix.node }}
+    # needs: test_lint
+    # strategy:
+    #   matrix:
+    #     node: [ '14', '13', '12', '11', '10', '8' ]
+    # name: Test with Node v${{ matrix.node }}
     steps:
     - uses: actions/checkout@v2
     - uses: actions/setup-node@v1
-      with:
-        node-version: ${{ matrix.node }}
+      # with:
+      #   node-version: ${{ matrix.node }}
     - run: npm ci
     - run: npm run build
     - run: npm run test
@@ -64,10 +64,10 @@ jobs:
         branch: ${{ github.sha }}
         compare_to_version: ${{steps.v_latest.outputs.version || '0.0.0'}}
     - name: 'Trigger the ''publish'' workflow if newer version' 
-      if: ${{ !!env.PAT && steps.v_master.outputs.compare_result == '1' }}
+      # if: ${{ !!env.PAT && steps.v_master.outputs.compare_result == '1' }}
       uses: garronej/github_actions_toolkit@v1.4
       env:
-        GITHUB_TOKEN: ${{ secrets.PAT }} 
+        GITHUB_TOKEN: ${{ secrets.PAT }}
       with:
         action_name: dispatch_event
         owner: ${{github.repository_owner}}

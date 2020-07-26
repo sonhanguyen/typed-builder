@@ -1,19 +1,11 @@
-import { URIS, Kind } from 'fp-ts/lib/HKT'
-
-type Append<T extends any[], E> =
-E extends unknown ? T:
-T extends [infer A] ? [A, E] :
-T extends [infer A, infer B] ? [A, B, E] :
-T extends [infer A, infer B, infer C] ? [A, B, C, E] :
-T extends [infer A, infer B, infer C, infer D] ? [A, B, C, D, E] :
-'only support tuples upto 4 elements'
+import type { URIS, Kind } from 'fp-ts/lib/HKT'
 
 export enum HKT { State, Name, Params }
 
-type $<T, Params extends any[]> = T extends [URIS, (infer Fixed)?] ? Kind<T[0], Append<Params, Fixed>> : T
+type $<T, P extends any[]> = T extends URIS ? Kind<T, P> : T
 
 export type Transition<P extends any[] | URIS = any[], F = any, T = any> =
-  (...args: P extends any[] ? P : any[]) => (_: F) => T
+  (...args: P extends any[] ? P : any[]) => (_: F) => $<T, [any, string, P]>
 
 type Params<T extends Transition, S, K> = $<Parameters<T>, [S, K]>
 type From<T extends Transition> = Parameters<ReturnType<T>>[0]
@@ -37,7 +29,7 @@ export type Builder<
         Queries
       >
     )
-    : never
+    : 'Not supported'
 }
 
 export const Assign = Symbol()
@@ -46,14 +38,14 @@ export const Get = Symbol()
 
 declare module 'fp-ts/lib/HKT' {
   interface URItoKind<A> {
-    [Merge]: A extends [infer State, any, [ infer Patch ], (infer Fixed)?] ?
-      State & Fixed & Patch
+    [Merge]: A extends [infer State, any, [ infer Patch ]] ?
+      State & Patch
     : never
     [Get]: A extends [infer State, any, [(infer CastTo)?]] ? (
       unknown extends CastTo ? State : CastTo
     ): never
-    [Assign]: A extends [infer State, string, [ infer Value ], (infer Fixed)?] ?
-      State & Fixed & Record<A[HKT.Name], Value>
+    [Assign]: A extends [infer State, string, [ infer Value ]] ?
+      State & Record<A[HKT.Name], Value>
     : never
   }
 }
@@ -88,10 +80,10 @@ export const Builder = <
   return createBuilder(() => {})
 }
 
-export const merge: Transition<[any], any, [typeof Merge]> =
+export const merge: Transition<[any], any, typeof Merge> =
   patch => (state = {} as any) => ({ ...state, ...patch })
 
-export const get: Transition<[any?], any, [typeof Get]> =
+export const get: Transition<[any?], any, typeof Get> =
   () => state => state as any
 
 export type Assignable<T> = Transition<[], T, T>
