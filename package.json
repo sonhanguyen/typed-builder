@@ -33,7 +33,12 @@
     "keywords": [],
     "homepage": "https://github.com/sonhanguyen/typed-builder",
     "devDependencies": {
+        "@babel/core": "^7.10.5",
+        "@babel/preset-env": "^7.10.4",
+        "@babel/preset-typescript": "^7.10.4",
+        "@types/jest": "^26.0.7",
         "@types/node": "^10.0.0",
+        "babel-jest": "^26.1.0",
         "denoify": "0.2.15",
         "evt": "1.7.11",
         "simplifyify": "8.0.1",
@@ -42,6 +47,7 @@
         "typescript": "^3.9.0"
     },
     "dependencies": {
-        "fp-ts": "^2.7.1"
+        "fp-ts": "^2.7.1",
+        "jest": "^26.1.0"
     }
 }

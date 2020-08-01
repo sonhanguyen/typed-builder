@@ -2,14 +2,26 @@ import type { URIS, Kind } from 'fp-ts/lib/HKT'
 
 export enum HKT { State, Name, Params }
 
-type $<T, P extends any[]> = T extends URIS ? Kind<T, P> : T
+export type Transition<P extends any[] | $<URIS> = any[], F = any, T = any> =
+  (...args: P extends any[] ? P : any[]) => (_: F) => T
 
-export type Transition<P extends any[] | URIS = any[], F = any, T = any> =
-  (...args: P extends any[] ? P : any[]) => (_: F) => $<T, [any, string, P]>
+type Params<T extends Transition, S, K, P = Parameters<T>> =
+  P extends $<URIS> ? Kind<URIS & Tag<P>, [S, K, Fixed<P>]> : P
 
-type Params<T extends Transition, S, K> = $<Parameters<T>, [S, K]>
 type From<T extends Transition> = Parameters<ReturnType<T>>[0]
-type To<T extends Transition, S, K, P> = $<ReturnType<ReturnType<T>>, [S, K, P]>
+type To<
+  T extends Transition,
+  S, K, P,
+  R = ReturnType<ReturnType<T>>
+> = R extends $<URIS> ? Kind<URIS & Tag<R>, [S, K, P, Fixed<R>]> : R
+
+const KIND = Symbol()
+type $<T, V extends {} = {}> = V & { [KIND]?: T }
+type Fixed<T extends $<any>> = Pick<T, Exclude<keyof T, typeof KIND>>
+type Tag<T extends $<any>> = Exclude<T[typeof KIND], undefined>
+const Tag = <T, V>(_: T, value: V): $<T, V> => value
+
+export const $ = Tag
 
 export type Builder<
   Transitions extends Record<string, Transition>,
@@ -17,7 +29,7 @@ export type Builder<
   Queries extends Transition | keyof Transitions = typeof merge
 > = (Queries extends Transition ? (
   State extends From<Queries> ? {
-    <P extends Params<Queries, State, never>>(...params: P): To<Queries, State, never, P>
+    <P extends Params<Queries, State, ''>>(...params: P): To<Queries, State, '', P>
   }: {})
 : {}) & { 
   [K in keyof Transitions]: State extends From<Transitions[K]>
@@ -29,37 +41,61 @@ export type Builder<
         Queries
       >
     )
-    : 'Not supported'
+    : NotSupported
 }
 
+const NOT_SUPPORTED = Symbol()
+export type NotSupported = typeof NOT_SUPPORTED
+
 export const Assign = Symbol()
+export type Assign = typeof Assign
+
+export const Assert = Symbol()
+export type Assert = typeof Assert
+
 export const Merge = Symbol()
+export type Merge = typeof Merge
+export const partial = <T = any>(): Transition<[Partial<T>], any, $<Merge>> =>
+  patch => (state = {} as any) => ({ ...state, ...patch })
+export const merge = partial()
+
 export const Get = Symbol()
+export type Get = typeof Get
+export const get: Transition<[any?], any, $<Get>> =
+  () => state => state as any
+
+export type Assignable<T> = Transition<[], T, $<Get>>
+export const Assignable = <T>(): Assignable<T> => get as any
+
+type Overwrite<O, P> = Omit<O, keyof P> & P
 
 declare module 'fp-ts/lib/HKT' {
   interface URItoKind<A> {
-    [Merge]: A extends [infer State, any, [ infer Patch ]] ?
-      State & Patch
+    [Merge]: A extends [infer State, any, [infer Patch], any] ?
+      Overwrite<State extends void ? {} : State, Patch>
     : never
-    [Get]: A extends [infer State, any, [(infer CastTo)?]] ? (
+    [Assert]: A extends [infer State, any, any[], infer T] ?
+      Overwrite<State extends void ? {} : State, T>
+    : never
+    [Get]: A extends [infer State, any, [(infer CastTo)?], any] ? (
       unknown extends CastTo ? State : CastTo
     ): never
-    [Assign]: A extends [infer State, string, [ infer Value ]] ?
-      State & Record<A[HKT.Name], Value>
+    [Assign]: A extends [infer State, string, [ infer Value ], any] ?
+      Overwrite<State, Record<A[HKT.Name], Value>>
     : never
   }
 }
 
 export const Builder = <
   Transitions extends Record<string, Transition> = typeof defaultTransitions,
-  Queries extends Record<string, Transition> = {},
+  Queries extends Record<string, Transition> | Transition = typeof get,
 >(
   transitions: Transitions = defaultTransitions as any,
-  queries: Queries | Transition = get
+  queries: Queries = get as any
 ): Builder<
-  Transitions & Queries,
-  void,
-  Queries extends (..._: any[]) => any ? Queries : keyof Queries
+  Transitions & (Queries extends Transition ? {} : Queries),
+  undefined,
+  Queries extends Transition ? Queries : keyof Queries
 > => {
   const createBuilder = (getState: () => any) => {
     const members = { ...transitions, ...queries }
@@ -79,14 +115,5 @@ export const Builder = <
   
   return createBuilder(() => {})
 }
-
-export const merge: Transition<[any], any, typeof Merge> =
-  patch => (state = {} as any) => ({ ...state, ...patch })
-
-export const get: Transition<[any?], any, typeof Get> =
-  () => state => state as any
-
-export type Assignable<T> = Transition<[], T, T>
-export const Assignable = <T>(): Assignable<T> => get as any
 
 const defaultTransitions = { with: merge }
