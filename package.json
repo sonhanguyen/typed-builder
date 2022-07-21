@@ -42,7 +42,7 @@
         "denoify": "0.2.15",
         "evt": "1.7.11",
         "simplifyify": "8.0.1",
-        "terser": "4.6.13",
+        "terser": "4.8.1",
         "tsd": "^0.13.1",
         "typescript": "^3.9.0"
     },
