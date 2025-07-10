@@ -1,5 +1,4 @@
 import { ExecutionPlan, PlanningConstraints } from './planning';
-import { ExecutionResult, ExecutionUpdate } from './execution';
 
 export interface AgentCapability {
   id: string;
@@ -61,17 +60,10 @@ export interface LLMAgent {
   context: AgentContext;
   
   plan(goal: string, constraints?: PlanningConstraints): Promise<ExecutionPlan>;
-  execute(plan: ExecutionPlan): Promise<string>;
-  monitor(executionId: string): AsyncIterable<ExecutionUpdate>;
-  getResult(executionId: string): ExecutionResult | undefined;
   
   addCapability(capability: AgentCapability): void;
   removeCapability(capabilityId: string): void;
   
   updateContext(updates: Partial<AgentContext>): void;
   getMemory(): AgentMemory;
-  
-  pause(): Promise<void>;
-  resume(): Promise<void>;
-  stop(): Promise<void>;
 }

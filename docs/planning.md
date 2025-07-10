@@ -2,256 +2,125 @@
 
 ## Overview
 
-The planning system provides sophisticated strategic planning capabilities for LLM agents. It supports multiple planning strategies, resource optimization, risk assessment, and constraint handling to generate optimal execution plans for complex goals.
+The planning system provides dynamic planning capabilities for LLM agents. It analyzes user goals and available capabilities to generate executable workflows that can be executed using LangGraph. The focus is on simplicity and flexibility rather than complex optimization.
 
 ## Core Concepts
 
 ### Planning Constraints
 
-Limitations and requirements that guide the planning process.
+Simple limitations and requirements that guide the planning process.
 
 ```typescript
 interface PlanningConstraints {
   maxDuration?: number;           // Maximum allowed execution time (ms)
-  maxCost?: number;              // Maximum allowed cost
-  availableResources?: Resource[]; // Available system resources
-  deadline?: Date;               // Hard deadline for completion
-  priorityThreshold?: Priority;   // Minimum task priority to include
-  excludedCapabilities?: string[]; // Capabilities to avoid
   requiredCapabilities?: string[]; // Capabilities that must be used
+  excludedCapabilities?: string[]; // Capabilities to avoid
 }
 ```
 
-### Resource Management
+### Execution Plan
 
-System resources that can be allocated and consumed during execution.
-
-```typescript
-interface Resource {
-  id: string;                    // Unique resource identifier
-  type: ResourceType;           // Type of resource
-  name: string;                 // Human-readable name
-  capacity: number;             // Total available capacity
-  available: number;            // Currently available amount
-  cost?: number;                // Cost per unit (optional)
-  metadata?: Record<string, any>; // Additional resource properties
-}
-```
-
-### ResourceType
-
-Types of resources that can be managed:
-
-- **COMPUTATIONAL**: CPU, GPU processing power
-- **MEMORY**: RAM, temporary storage
-- **STORAGE**: Persistent storage capacity
-- **NETWORK**: Bandwidth, API rate limits
-- **API_QUOTA**: Third-party service quotas
-- **HUMAN**: Human expertise/intervention
-- **EXTERNAL_SERVICE**: External service dependencies
-
-## Planning Strategy
-
-### ExecutionPlan
-
-Complete plan for achieving a specific goal.
+A plan containing the goal and dynamically generated workflow.
 
 ```typescript
 interface ExecutionPlan {
-  id: string;                        // Unique plan identifier
-  goal: string;                      // Target goal description
-  strategy: PlanningStrategy;        // Planning approach used
-  workflow: Workflow;               // Generated workflow
-  constraints: PlanningConstraints; // Applied constraints
-  estimatedDuration: number;        // Estimated completion time
-  estimatedCost: number;            // Estimated total cost
-  riskAssessment: RiskAssessment;   // Risk analysis
-  alternatives: AlternativePlan[];  // Alternative approaches
+  id: string;                    // Unique plan identifier
+  goal: string;                  // Target goal description
+  workflow: Workflow;           // Generated workflow with tasks
+  estimatedDuration?: number;   // Estimated completion time
   createdAt: Date;
+}
+```
+
+## Dynamic Planning
+
+### The Planning Process
+
+1. **Goal Analysis**: Break down the user goal into actionable components
+2. **Capability Mapping**: Match available capabilities to required actions
+3. **Task Generation**: Create specific tasks with dependencies
+4. **Workflow Assembly**: Organize tasks into executable workflow
+
+```typescript
+// Planning flow
+const plan = await planner.createPlan(goal, capabilities, constraints);
+const graph = buildGraphFromPlan(plan);
+const result = await graph.invoke({ goal });
+```
+
+### Task Types
+
+Tasks can have different execution patterns:
+
+- **ATOMIC**: Single, indivisible action
+- **SEQUENTIAL**: Tasks that must run in order
+- **PARALLEL**: Tasks that can run concurrently
+- **CONDITIONAL**: Tasks with branching logic
+
+```typescript
+interface Task {
+  id: string;
+  name: string;
+  type: 'atomic' | 'sequential' | 'parallel' | 'conditional';
+  dependencies: string[];       // IDs of prerequisite tasks
+  parameters: Record<string, any>;
+}
+```
+
+## Workflow Structure
+
+### Workflow
+
+Container for organized tasks with dependency relationships.
+
+```typescript
+interface Workflow {
+  id: string;
+  tasks: Task[];               // All tasks in execution order
   
-  // Plan operations
-  validate(): PlanValidationResult;
-  optimize(criteria: OptimizationCriteria): ExecutionPlan;
-  getResourceRequirements(): ResourceRequirement[];
+  // Helper methods
+  addTask(task: Task): void;
+  removeTask(taskId: string): void;
+  getExecutableNodes(): Task[]; // Tasks ready to run
+  isComplete(): boolean;
 }
 ```
 
-### PlanningStrategy
+### Dynamic Workflow Generation
 
-Different approaches to plan generation:
+The planner dynamically creates workflows based on:
 
-- **GREEDY**: Fast, locally optimal decisions
-- **OPTIMAL**: Global optimization (computationally expensive)
-- **HEURISTIC**: Rule-based approximations
-- **ADAPTIVE**: Learning-based approaches
-- **MONTE_CARLO**: Probabilistic exploration
-
-## Risk Assessment
-
-### RiskAssessment
-
-Comprehensive analysis of potential risks and mitigations.
+- **Goal complexity**: Simple goals → fewer tasks, complex goals → more tasks
+- **Available capabilities**: Only uses capabilities the agent has
+- **Task dependencies**: Ensures proper execution order
 
 ```typescript
-interface RiskAssessment {
-  overallRisk: RiskLevel;        // Aggregated risk level
-  risks: Risk[];                 // Individual risk factors
-  mitigations: Mitigation[];     // Risk mitigation strategies
-}
-```
+// Example: Research goal generates multi-step workflow
+const goal = "Research market trends in renewable energy";
 
-### Risk
-
-Individual risk factor that could impact plan execution.
-
-```typescript
-interface Risk {
-  id: string;
-  type: RiskType;               // Category of risk
-  description: string;          // Risk description
-  probability: number;          // Likelihood (0-1)
-  impact: RiskLevel;           // Severity if occurs
-  taskIds?: string[];          // Affected tasks
-}
-```
-
-### RiskType
-
-Categories of risks:
-
-- **RESOURCE_SHORTAGE**: Insufficient resources
-- **DEPENDENCY_FAILURE**: External dependency issues
-- **TIMEOUT**: Execution time overruns
-- **API_LIMIT**: Rate limiting or quota exhaustion
-- **EXTERNAL_SERVICE**: Third-party service failures
-- **DATA_QUALITY**: Poor input data quality
-- **SECURITY**: Security vulnerabilities or breaches
-
-### RiskLevel
-
-Risk severity levels:
-
-- **LOW**: Minor impact, easily manageable
-- **MEDIUM**: Moderate impact, requires attention
-- **HIGH**: Significant impact, needs mitigation
-- **CRITICAL**: Severe impact, may prevent completion
-
-### Mitigation
-
-Strategy for reducing or handling specific risks.
-
-```typescript
-interface Mitigation {
-  riskId: string;               // Associated risk ID
-  strategy: MitigationStrategy; // Type of mitigation
-  description: string;          // Mitigation description
-  cost: number;                // Implementation cost
-  effectiveness: number;       // Risk reduction (0-1)
-}
-```
-
-### MitigationStrategy
-
-Types of risk mitigation:
-
-- **AVOIDANCE**: Eliminate the risk entirely
-- **MITIGATION**: Reduce probability or impact
-- **TRANSFER**: Shift risk to external party
-- **ACCEPTANCE**: Accept and monitor the risk
-- **CONTINGENCY**: Prepare backup plans
-
-## Plan Optimization
-
-### OptimizationCriteria
-
-Criteria for optimizing execution plans.
-
-```typescript
-interface OptimizationCriteria {
-  optimizeFor: OptimizationTarget;     // Primary optimization target
-  weights?: OptimizationWeights;       // Multi-objective weights
-  constraints?: OptimizationConstraints; // Additional constraints
-}
-```
-
-### OptimizationTarget
-
-Primary optimization objectives:
-
-- **DURATION**: Minimize execution time
-- **COST**: Minimize resource costs
-- **QUALITY**: Maximize output quality
-- **RELIABILITY**: Maximize success probability
-- **RESOURCE_EFFICIENCY**: Optimize resource utilization
-
-### OptimizationWeights
-
-Weights for multi-objective optimization.
-
-```typescript
-interface OptimizationWeights {
-  duration: number;     // Weight for time optimization
-  cost: number;         // Weight for cost optimization
-  quality: number;      // Weight for quality optimization
-  reliability: number;  // Weight for reliability optimization
-}
-```
-
-## Plan Validation
-
-### PlanValidationResult
-
-Result of plan validation process.
-
-```typescript
-interface PlanValidationResult {
-  isValid: boolean;
-  errors: PlanValidationError[];     // Critical issues
-  warnings: PlanValidationWarning[]; // Non-critical issues
-  suggestions: PlanSuggestion[];     // Improvement recommendations
-}
-```
-
-### PlanValidationError
-
-Critical validation issue that prevents execution.
-
-```typescript
-interface PlanValidationError {
-  code: string;                      // Error code
-  message: string;                   // Error description
-  severity: 'error' | 'warning';    // Issue severity
-  taskId?: string;                   // Affected task (if specific)
-}
-```
-
-### PlanSuggestion
-
-Recommendation for plan improvement.
-
-```typescript
-interface PlanSuggestion {
-  type: 'optimization' | 'alternative' | 'improvement';
-  description: string;               // Suggestion description
-  expectedBenefit: string;          // Expected improvement
-}
-```
-
-## Alternative Plans
-
-### AlternativePlan
-
-Alternative approach for achieving the same goal.
-
-```typescript
-interface AlternativePlan {
-  id: string;
-  description: string;              // Alternative description
-  workflow: Workflow;              // Alternative workflow
-  estimatedDuration: number;       // Alternative time estimate
-  estimatedCost: number;           // Alternative cost estimate
-  tradeoffs: string[];             // Compared to primary plan
-}
+// Planner generates:
+const workflow = {
+  tasks: [
+    {
+      id: "search_trends",
+      type: "atomic",
+      dependencies: [],
+      // ... search for trend data
+    },
+    {
+      id: "analyze_data", 
+      type: "parallel",
+      dependencies: ["search_trends"],
+      // ... analyze collected data
+    },
+    {
+      id: "generate_report",
+      type: "atomic", 
+      dependencies: ["analyze_data"],
+      // ... create final report
+    }
+  ]
+};
 ```
 
 ## Planner Interface
@@ -262,33 +131,38 @@ Main interface for the planning system.
 
 ```typescript
 interface Planner {
-  // Plan creation
   createPlan(
     goal: string, 
     capabilities: AgentCapability[], 
     constraints?: PlanningConstraints
   ): Promise<ExecutionPlan>;
+}
+```
+
+### LangGraph Integration
+
+Convert plans to executable LangGraph structures:
+
+```typescript
+function buildGraphFromPlan(plan: ExecutionPlan): StateGraph {
+  const graph = new StateGraph();
   
-  // Plan optimization
-  optimizePlan(
-    plan: ExecutionPlan, 
-    criteria: OptimizationCriteria
-  ): Promise<ExecutionPlan>;
+  // Add nodes for each task
+  for (const task of plan.workflow.tasks) {
+    graph.add_node(task.id, createTaskFunction(task));
+  }
   
-  // Plan validation
-  validatePlan(plan: ExecutionPlan): PlanValidationResult;
+  // Add edges based on dependencies
+  for (const task of plan.workflow.tasks) {
+    if (task.dependencies.length === 0) {
+      graph.add_edge(START, task.id);
+    }
+    for (const dep of task.dependencies) {
+      graph.add_edge(dep, task.id);
+    }
+  }
   
-  // Alternative generation
-  generateAlternatives(
-    goal: string, 
-    constraints: PlanningConstraints
-  ): Promise<AlternativePlan[]>;
-  
-  // Risk assessment
-  assessRisk(plan: ExecutionPlan): RiskAssessment;
-  
-  // Resource estimation
-  estimateResources(plan: ExecutionPlan): ResourceRequirement[];
+  return graph.compile();
 }
 ```
 
@@ -299,7 +173,7 @@ interface Planner {
 ```typescript
 const planner: Planner = new DefaultPlanner();
 
-const goal = "Create a comprehensive market analysis report";
+const goal = "Create a market analysis report";
 
 const capabilities: AgentCapability[] = [
   { id: "web_search", name: "Web Search", description: "Search for information" },
@@ -309,206 +183,132 @@ const capabilities: AgentCapability[] = [
 
 const constraints: PlanningConstraints = {
   maxDuration: 7200000, // 2 hours
-  maxCost: 50,          // $50
-  deadline: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
   requiredCapabilities: ["web_search", "data_analysis"]
 };
 
 const plan = await planner.createPlan(goal, capabilities, constraints);
 ```
 
-### Plan Optimization
+### Plan to Graph Execution
 
 ```typescript
-// Optimize for speed
-const speedOptimized = await planner.optimizePlan(plan, {
-  optimizeFor: OptimizationTarget.DURATION,
-  constraints: {
-    maxCost: 100 // Allow higher cost for speed
-  }
-});
+// Create plan
+const plan = await planner.createPlan(goal, capabilities);
 
-// Multi-objective optimization
-const balanced = await planner.optimizePlan(plan, {
-  optimizeFor: OptimizationTarget.RESOURCE_EFFICIENCY,
-  weights: {
-    duration: 0.3,
-    cost: 0.4,
-    quality: 0.2,
-    reliability: 0.1
-  }
-});
-```
+// Convert to LangGraph
+const graph = buildGraphFromPlan(plan);
 
-### Risk Assessment and Mitigation
-
-```typescript
-const riskAssessment = planner.assessRisk(plan);
-
-console.log(`Overall risk: ${riskAssessment.overallRisk}`);
-
-riskAssessment.risks.forEach(risk => {
-  console.log(`Risk: ${risk.description}`);
-  console.log(`Probability: ${risk.probability * 100}%`);
-  console.log(`Impact: ${risk.impact}`);
-  
-  // Find mitigations for this risk
-  const mitigations = riskAssessment.mitigations
-    .filter(m => m.riskId === risk.id);
-  
-  mitigations.forEach(mitigation => {
-    console.log(`Mitigation: ${mitigation.description}`);
-    console.log(`Effectiveness: ${mitigation.effectiveness * 100}%`);
-    console.log(`Cost: $${mitigation.cost}`);
-  });
-});
-```
-
-### Plan Validation
-
-```typescript
-const validation = planner.validatePlan(plan);
-
-if (!validation.isValid) {
-  console.log("Plan validation failed:");
-  validation.errors.forEach(error => {
-    console.log(`${error.severity}: ${error.message}`);
-  });
-} else {
-  console.log("Plan is valid!");
+// Execute with streaming
+for await (const chunk of graph.stream({ goal }, { 
+  configurable: { thread_id: "session-123" }
+})) {
+  console.log("Step completed:", chunk);
 }
 
-// Display warnings and suggestions
-validation.warnings.forEach(warning => {
-  console.log(`Warning: ${warning.message}`);
-});
-
-validation.suggestions.forEach(suggestion => {
-  console.log(`Suggestion (${suggestion.type}): ${suggestion.description}`);
-  console.log(`Expected benefit: ${suggestion.expectedBenefit}`);
+// Or execute synchronously
+const result = await graph.invoke({ goal }, {
+  configurable: { thread_id: "session-123" }
 });
 ```
 
-### Resource Planning
+### Capability-Driven Planning
 
 ```typescript
-const resourceRequirements = planner.estimateResources(plan);
-
-resourceRequirements.forEach(req => {
-  console.log(`Resource: ${req.resourceType}`);
-  console.log(`Amount: ${req.amount}`);
-  console.log(`Duration: ${req.duration}ms`);
-  console.log(`Critical: ${req.critical}`);
-  
-  if (req.alternatives) {
-    console.log(`Alternatives: ${req.alternatives.join(', ')}`);
-  }
-});
-
-// Check resource availability
-const availableResources: Resource[] = [
-  {
-    id: "cpu-1",
-    type: ResourceType.COMPUTATIONAL,
-    name: "Primary CPU",
-    capacity: 100,
-    available: 75,
-    cost: 0.01
-  },
-  {
-    id: "memory-1", 
-    type: ResourceType.MEMORY,
-    name: "System Memory",
-    capacity: 16384,
-    available: 12000
-  }
+// Planning adapts to available capabilities
+const basicCapabilities = [
+  { id: "web_search", name: "Web Search", description: "Search the web" }
 ];
 
-const constraintsWithResources: PlanningConstraints = {
-  ...constraints,
-  availableResources
-};
+const advancedCapabilities = [
+  { id: "web_search", name: "Web Search", description: "Search the web" },
+  { id: "data_analysis", name: "Data Analysis", description: "Analyze data" },
+  { id: "visualization", name: "Data Visualization", description: "Create charts" },
+  { id: "report_generation", name: "Report Generation", description: "Generate reports" }
+];
+
+// Same goal, different plans based on capabilities
+const basicPlan = await planner.createPlan(goal, basicCapabilities);
+const advancedPlan = await planner.createPlan(goal, advancedCapabilities);
+
+console.log(`Basic plan: ${basicPlan.workflow.tasks.length} tasks`);
+console.log(`Advanced plan: ${advancedPlan.workflow.tasks.length} tasks`);
 ```
 
-### Alternative Plan Generation
+### Constraint Handling
 
 ```typescript
-const alternatives = await planner.generateAlternatives(goal, constraints);
-
-alternatives.forEach((alt, index) => {
-  console.log(`Alternative ${index + 1}: ${alt.description}`);
-  console.log(`Duration: ${alt.estimatedDuration}ms`);
-  console.log(`Cost: $${alt.estimatedCost}`);
-  console.log(`Tradeoffs: ${alt.tradeoffs.join(', ')}`);
-});
-
-// Compare plans
-const comparePlans = (plan1: ExecutionPlan, plan2: AlternativePlan) => {
-  console.log('Plan Comparison:');
-  console.log(`Primary - Duration: ${plan1.estimatedDuration}ms, Cost: $${plan1.estimatedCost}`);
-  console.log(`Alternative - Duration: ${plan2.estimatedDuration}ms, Cost: $${plan2.estimatedCost}`);
-  
-  if (plan2.estimatedDuration < plan1.estimatedDuration) {
-    console.log('Alternative is faster');
-  }
-  if (plan2.estimatedCost < plan1.estimatedCost) {
-    console.log('Alternative is cheaper');
-  }
+// Time-constrained planning
+const timeConstraints: PlanningConstraints = {
+  maxDuration: 1800000, // 30 minutes
+  requiredCapabilities: ["web_search"]
 };
+
+const quickPlan = await planner.createPlan(goal, capabilities, timeConstraints);
+
+// Capability-constrained planning
+const limitedConstraints: PlanningConstraints = {
+  excludedCapabilities: ["external_api"], // Avoid external dependencies
+  requiredCapabilities: ["local_analysis"]
+};
+
+const offlinePlan = await planner.createPlan(goal, capabilities, limitedConstraints);
 ```
 
-### Adaptive Planning
+## Task Function Creation
+
+### Converting Tasks to Functions
+
+Each task in the workflow becomes a function in the LangGraph:
 
 ```typescript
-// Create plan with adaptive strategy
-const adaptivePlan = await planner.createPlan(goal, capabilities, {
-  ...constraints,
-  strategy: PlanningStrategy.ADAPTIVE
-});
-
-// Re-plan based on execution feedback
-const replan = async (executionFeedback: any) => {
-  const updatedConstraints: PlanningConstraints = {
-    ...constraints,
-    maxDuration: constraints.maxDuration! - executionFeedback.elapsedTime,
-    availableResources: executionFeedback.remainingResources
+function createTaskFunction(task: Task) {
+  return async (state: any) => {
+    switch (task.type) {
+      case 'atomic':
+        return await executeAtomicTask(task, state);
+      case 'parallel':
+        return await executeParallelTask(task, state);
+      case 'conditional':
+        return await executeConditionalTask(task, state);
+      default:
+        return await executeSequentialTask(task, state);
+    }
   };
-  
-  return await planner.createPlan(
-    goal, 
-    capabilities, 
-    updatedConstraints
-  );
-};
+}
+
+async function executeAtomicTask(task: Task, state: any) {
+  // Execute single action based on task parameters
+  const capability = getCapabilityById(task.parameters.capabilityId);
+  return await capability.execute(task.parameters);
+}
 ```
 
 ## Best Practices
 
-### Planning Strategy Selection
+### Planning Strategy
 
-1. **GREEDY**: Use for time-critical situations where good-enough is sufficient
-2. **OPTIMAL**: Use for critical tasks where the best solution is required
-3. **HEURISTIC**: Use for complex domains with established best practices
-4. **ADAPTIVE**: Use for dynamic environments with changing conditions
-5. **MONTE_CARLO**: Use for uncertain environments requiring exploration
+1. **Goal Decomposition**: Break complex goals into manageable tasks
+2. **Capability Utilization**: Use available capabilities effectively
+3. **Dependency Management**: Ensure proper task ordering
+4. **Constraint Respect**: Stay within specified limits
 
-### Constraint Design
+### Task Design
 
-1. **Realistic Constraints**: Set achievable limits based on actual capabilities
-2. **Constraint Prioritization**: Identify hard vs. soft constraints
-3. **Resource Buffers**: Include safety margins for resource estimates
-4. **Deadline Management**: Account for unexpected delays
+1. **Atomic Tasks**: Keep individual tasks focused and specific
+2. **Clear Dependencies**: Make task relationships explicit
+3. **Parameter Passing**: Use task parameters for configuration
+4. **Error Handling**: Plan for task failure scenarios
 
-### Risk Management
+### Workflow Optimization
 
-1. **Comprehensive Assessment**: Consider all categories of risk
-2. **Probabilistic Thinking**: Use realistic probability estimates
-3. **Cost-Benefit Analysis**: Balance mitigation costs with risk reduction
-4. **Contingency Planning**: Prepare backup plans for high-impact risks
+1. **Parallel Execution**: Identify tasks that can run concurrently
+2. **Resource Efficiency**: Avoid unnecessary task duplication
+3. **Early Termination**: Allow workflows to stop early when goals are met
+4. **Incremental Progress**: Design tasks to build on each other
 
-### Optimization Strategies
+### LangGraph Integration
 
-1. **Clear Objectives**: Define optimization goals explicitly
-2. **Multi-Objective Balance**: Use appropriate weights for trade-offs
-3. **Iterative Refinement**: Continuously improve plans based on feedback
-4. **Performance Monitoring**: Track actual vs. estimated performance
+1. **State Management**: Use graph state to pass data between tasks
+2. **Checkpointing**: Leverage LangGraph's built-in checkpointing
+3. **Streaming**: Use streaming for real-time progress updates
+4. **Error Recovery**: Handle task failures gracefully within the graph
