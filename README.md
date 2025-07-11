@@ -1,350 +1,275 @@
-# Dynamic Agent Planning Framework
+# Typed Agent Builder
 
-A TypeScript framework for building LLM agents with dynamic planning capabilities. This framework provides a type-safe foundation for creating AI agents that can dynamically plan and execute complex multi-step tasks using LangGraph for execution.
+A TypeScript framework for building autonomous agents with streaming execution and composable workflows. This framework provides a type-safe foundation for creating AI agents that can execute tasks through workflows, with support for tool calls, agent composition, and resource management.
 
-## Features
+## Core Concepts
 
-- 🤖 **Dynamic Planning** - Generate execution plans from user goals and available capabilities
-- 📋 **LangGraph Integration** - Leverage LangGraph's robust execution engine for plan execution
-- 🔄 **Flexible Workflows** - Support for sequential, parallel, conditional, and atomic task patterns
-- ⚡ **Real-time Execution** - Built-in streaming and checkpointing via LangGraph
-- 🎯 **Capability-based Design** - Modular agent composition with pluggable skills
-- 🔧 **Type Safety** - Full TypeScript support with comprehensive type definitions
+### Agents
+Agents are the fundamental execution units that process input and produce streaming output:
 
-## Architecture Overview
-
-The framework consists of two main components that work together:
-
-```
-┌─────────────────┐    ┌─────────────────┐
-│   Planning      │ -> │   LangGraph     │
-│   System        │    │   Execution     │
-└─────────────────┘    └─────────────────┘
-        │                       │
-   Dynamic Graph           Robust Runtime
-   Generation              with Streaming
-   Capability Mapping      State Management
-   Task Dependencies       Checkpointing
+```typescript
+interface Agent {
+  id: string
+  name: string
+  run(input: AgentInput): AsyncGenerator<AgentOutput, AgentOutput, AgentEvent>
+}
 ```
 
-### Core Flow
+- **Input**: Named parameters as an object
+- **Output**: Streaming values, ending with final result or error
+- **Events**: Bidirectional communication channel (e.g., tool call results)
 
-1. **Dynamic Planning** - Analyze user goal and generate execution plan with task dependencies
-2. **Graph Generation** - Convert plan into LangGraph StateGraph structure  
-3. **Execution** - Run the generated graph with LangGraph's execution engine
+### LLM Agents
+Specialized agents that work with prompts and emit thoughts/tool calls:
 
-### Core Components
+```typescript
+interface LLMAgent extends Agent {
+  run(input: { prompt: string }): AsyncGenerator<LLMAgentOutput, LLMAgentOutput, LLMToolCallResult>
+}
+```
 
-1. **[Agent System](./docs/agent.md)** - Core agent interfaces with capability management
-2. **[Planning System](./docs/planning.md)** - Dynamic planning with task generation
-3. **[Workflow Engine](./docs/workflow.md)** - Task definitions and workflow structures
-4. **[Execution System](./docs/execution.md)** - LangGraph integration and execution monitoring
+LLM agents can:
+- Stream their reasoning process as thoughts
+- Emit tool calls for external execution
+- Receive tool call results via events
+
+### Workflows & Tasks
+Workflows are execution graphs composed of tasks with dependencies:
+
+```typescript
+interface Task {
+  id: string
+  name: string
+  type: 'tool_call' | 'agent_call'
+  dependencies: string[]
+  input: TaskInput
+}
+
+interface Workflow {
+  id: string
+  name: string
+  tasks: Map<string, Task>
+  input: Record<string, any>
+}
+```
+
+Tasks can be:
+- **Tool calls**: Execute external tools with parameters
+- **Agent calls**: Invoke other agents recursively
+
+### Workers & Resources
+Workers execute tasks and are bound to resources:
+
+```typescript
+interface Worker {
+  id: string
+  name: string
+  resources: Resource[]
+  
+  canExecute(task: Task): boolean
+  execute(task: Task): Promise<void>
+}
+```
+
+Resources represent execution environments:
+- **Browser**: Web browser instances
+- **Sandbox**: Code execution environments
+- **Custom**: Domain-specific resources
+
+### Job Management
+Jobs represent running agent instances with lifecycle management:
+
+```typescript
+interface Job {
+  id: string
+  agentId: string
+  status: JobStatus
+  stream(): AsyncGenerator<AgentOutput, AgentOutput, AgentEvent>
+  cancel(): Promise<void>
+}
+```
+
+The `AgentOrchestrator` creates and manages jobs:
+
+```typescript
+interface AgentOrchestrator {
+  createJob(agent: Agent, input: AgentInput): Promise<Job>
+  getJob(jobId: string): Job | null
+  cancelJob(jobId: string): Promise<void>
+}
+```
+
+## Architecture
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│     Agents      │    │   Workflows     │    │    Workers      │
+│                 │    │                 │    │                 │
+│ • LLM Agents    │ -> │ • Tasks         │ -> │ • Resource Mgmt │
+│ • Tool Calls    │    │ • Dependencies  │    │ • Execution     │
+│ • Streaming I/O │    │ • Agent Calls   │    │ • Scheduling    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         |                       |                       |
+    ┌─────────────────────────────────────────────────────────────┐
+    │                 Execution Engine                            │
+    │                                                             │
+    │ • Job Management    • Event Routing    • Progress Tracking │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+## Key Features
+
+- 🤖 **Streaming Agents** - Agents with real-time streaming output and bidirectional events
+- 🔄 **Composable Workflows** - Task graphs with dependency resolution and agent recursion
+- ⚡ **Resource Management** - Workers bound to execution resources (browsers, sandboxes)
+- 🎯 **Type Safety** - Full TypeScript support with comprehensive type definitions
+- 🔧 **Job Control** - Lifecycle management with status tracking and cancellation
+- 📊 **Progress Tracking** - Real-time execution monitoring and event streaming
 
 ## Quick Start
 
-### Installation
-
-```bash
-npm install dynamic-agent-framework
-npm install @langchain/langgraph
-```
-
-### Basic Usage
+### Basic Agent Usage
 
 ```typescript
-import { LLMAgent, AgentCapability, buildGraphFromPlan } from 'dynamic-agent-framework';
-import { StateGraph } from '@langchain/langgraph';
+import { LLMAgent, AgentOrchestrator } from 'typed-agent-builder'
 
-// Define agent capabilities
-const capabilities: AgentCapability[] = [
-  {
-    id: "web_search",
-    name: "Web Search",
-    description: "Search the web for information",
-    parameters: { maxResults: 10 }
-  },
-  {
-    id: "data_analysis",
-    name: "Data Analysis", 
-    description: "Analyze and process data",
-    parameters: { maxDataSize: 1000000 }
+// Create an LLM agent
+const agent: LLMAgent = new MyLLMAgent({
+  id: 'research-agent',
+  name: 'Research Assistant'
+})
+
+// Create orchestrator and run job
+const orchestrator = new AgentOrchestrator()
+const job = await orchestrator.createJob(agent, { 
+  prompt: 'Research the latest developments in quantum computing' 
+})
+
+// Stream the results
+for await (const output of job.stream()) {
+  if (output.thought) {
+    console.log('Thinking:', output.thought.content)
   }
-];
+  if (output.toolCall) {
+    console.log('Tool call:', output.toolCall.toolName)
+    
+    // Execute tool and send result back
+    const result = await executeTool(output.toolCall)
+    await job.stream().next({
+      id: 'result-1',
+      timestamp: new Date(),
+      type: 'tool_call_result',
+      data: { toolCallId: output.toolCall.id, result }
+    })
+  }
+  if (output.done) {
+    console.log('Final result:', output.value)
+    break
+  }
+}
+```
 
-// Create agent with planning capability
-const agent: LLMAgent = new DefaultLLMAgent({
-  id: "research-agent",
-  name: "Research Assistant",
-  capabilities,
-  context: {
-    sessionId: "session-123",
-    environment: { locale: "en-US" },
-    memory: {
-      shortTerm: new Map(),
-      longTerm: new Map(),
-      episodic: []
+### Workflow Execution
+
+```typescript
+import { Workflow, Task, ExecutionEngine } from 'typed-agent-builder'
+
+// Define a workflow
+const workflow: Workflow = {
+  id: 'research-pipeline',
+  name: 'Research Pipeline',
+  tasks: new Map([
+    ['search', {
+      id: 'search',
+      name: 'Web Search',
+      type: 'tool_call',
+      dependencies: [],
+      input: { query: 'quantum computing 2024' },
+      toolName: 'web_search'
+    }],
+    ['analyze', {
+      id: 'analyze', 
+      name: 'Analysis',
+      type: 'agent_call',
+      dependencies: ['search'],
+      input: { data: '${search.output}' },
+      agent: analysisAgent
+    }]
+  ]),
+  input: { topic: 'quantum computing' }
+}
+
+// Execute workflow
+const engine = new ExecutionEngine()
+for await (const update of engine.executeWorkflow(workflow)) {
+  console.log(`Progress: ${update.progress.percentage}%`)
+  console.log(`Current task: ${update.currentTask}`)
+}
+```
+
+### Worker Management
+
+```typescript
+import { Worker, BrowserResource, SandboxResource } from 'typed-agent-builder'
+
+// Create workers with resources
+const browserWorker: Worker = {
+  id: 'browser-1',
+  name: 'Browser Worker',
+  resources: [{
+    id: 'chrome-1',
+    type: 'browser',
+    status: 'available',
+    metadata: {
+      browserType: 'chrome',
+      version: '120.0.0'
     }
-  }
-});
-
-// Dynamic planning and execution
-async function executeTask() {
-  const goal = "Research the latest developments in quantum computing";
-  
-  // 1. Create dynamic execution plan
-  const plan = await agent.plan(goal);
-  console.log(`Created plan with ${plan.workflow.tasks.length} tasks`);
-  
-  // 2. Generate LangGraph from plan
-  const graph = buildGraphFromPlan(plan);
-  
-  // 3. Execute with LangGraph
-  const result = await graph.invoke({ goal }, { 
-    configurable: { thread_id: "research-session" }
-  });
-  
-  console.log('Execution completed:', result);
+  }]
 }
 
-executeTask().catch(console.error);
-```
-
-## Key Concepts
-
-### Agent Capabilities
-
-Agents are composed of modular capabilities that define what they can do:
-
-```typescript
-const webSearchCapability: AgentCapability = {
-  id: "web_search",
-  name: "Web Search",
-  description: "Search the web using various search engines",
-  parameters: {
-    maxResults: 10,
-    timeout: 30000,
-    allowedDomains: ["*.edu", "*.org"]
-  }
-};
-```
-
-### Dynamic Planning
-
-The planning system analyzes goals and generates executable workflows:
-
-```typescript
-const plan = await planner.createPlan(goal, capabilities, {
-  maxDuration: 7200000,
-  requiredCapabilities: ["web_search", "data_analysis"]
-});
-
-// Plan contains dynamically generated task graph
-console.log(plan.workflow.tasks); // Array of interconnected tasks
-```
-
-### Task Dependencies
-
-Plans automatically handle task dependencies and execution order:
-
-```typescript
-const workflow: WorkflowDefinition = {
-  name: "Research Pipeline",
-  tasks: [
-    {
-      id: "search",
-      type: TaskType.ATOMIC,
-      dependencies: [] // Runs first
-    },
-    {
-      id: "analyze", 
-      type: TaskType.PARALLEL,
-      dependencies: ["search"] // Runs after search
-    },
-    {
-      id: "summarize",
-      type: TaskType.ATOMIC,
-      dependencies: ["analyze"] // Runs after analyze
+const codeWorker: Worker = {
+  id: 'sandbox-1', 
+  name: 'Code Execution Worker',
+  resources: [{
+    id: 'python-env-1',
+    type: 'sandbox',
+    status: 'available',
+    metadata: {
+      language: 'python',
+      timeout: 30000
     }
-  ]
-};
-```
-
-### LangGraph Integration
-
-Generated plans are converted to LangGraph structures for execution:
-
-```typescript
-// Convert plan to executable graph
-const graph = buildGraphFromPlan(plan);
-
-// Execute with streaming support
-for await (const update of graph.stream({ goal }, config)) {
-  console.log(`Current step: ${update}`);
-}
-```
-
-## Advanced Features
-
-### Memory Management
-
-Agents maintain multi-layered memory systems:
-
-- **Short-term**: Session variables and temporary data
-- **Long-term**: Learned patterns and persistent knowledge  
-- **Episodic**: Complete interaction histories
-
-### Dynamic Graph Generation
-
-Plans are converted to executable LangGraph structures:
-
-```typescript
-function buildGraphFromPlan(plan: ExecutionPlan): StateGraph {
-  const graph = new StateGraph();
-  
-  // Add nodes for each task
-  for (const task of plan.workflow.tasks) {
-    graph.add_node(task.id, createTaskFunction(task));
-  }
-  
-  // Add edges based on dependencies
-  for (const task of plan.workflow.tasks) {
-    for (const dep of task.dependencies) {
-      graph.add_edge(dep, task.id);
-    }
-  }
-  
-  return graph.compile();
-}
-```
-
-### Checkpointing and Streaming
-
-Built-in support via LangGraph integration:
-
-```typescript
-// Checkpointing
-const config = { 
-  configurable: { thread_id: "session-123" }
-};
-
-// Streaming execution
-for await (const chunk of graph.stream(inputs, config)) {
-  console.log("Step completed:", chunk);
+  }]
 }
 
-// Resume from checkpoint
-const result = await graph.invoke(inputs, config); // Automatically resumes
-```
-
-## Documentation
-
-- **[Agent System](./docs/agent.md)** - Core agent interfaces and capabilities
-- **[Planning System](./docs/planning.md)** - Strategic planning and optimization
-- **[Workflow Engine](./docs/workflow.md)** - Task orchestration and management
-- **[Execution System](./docs/execution.md)** - Real-time execution and monitoring
-
-## Examples
-
-### Research Agent
-
-```typescript
-// Create a research agent with web search and analysis capabilities
-const researchAgent = createAgent({
-  capabilities: ["web_search", "document_analysis", "report_generation"],
-  goal: "Analyze market trends in renewable energy"
-});
-
-const plan = await researchAgent.plan("Find and analyze recent renewable energy market data");
-const graph = buildGraphFromPlan(plan);
-const result = await graph.invoke({ goal: plan.goal });
-```
-
-### Code Review Agent  
-
-```typescript
-// Create a code review agent with development capabilities
-const codeReviewAgent = createAgent({
-  capabilities: ["code_analysis", "git_operations", "issue_tracking"],
-  goal: "Review pull request and provide feedback"
-});
-
-const plan = await codeReviewAgent.plan("Review PR #123 for security and performance issues");
-const graph = buildGraphFromPlan(plan);
-const result = await graph.invoke({ prNumber: 123 });
-```
-
-### Data Processing Agent
-
-```typescript
-// Create a data processing agent with ETL capabilities
-const dataAgent = createAgent({
-  capabilities: ["data_extraction", "data_transformation", "data_loading"],
-  goal: "Process customer data pipeline"
-});
-
-const plan = await dataAgent.plan("Extract customer data, clean it, and load to warehouse");
-const graph = buildGraphFromPlan(plan);
-const result = await graph.invoke({ dataSource: "customers.csv" });
-```
-
-## Development
-
-### Building
-
-```bash
-npm run build
-```
-
-### Type Checking
-
-```bash
-npm run typecheck
-```
-
-### Development Mode
-
-```bash
-npm run dev
-```
-
-## TypeScript Support
-
-This framework is built with TypeScript first and provides comprehensive type definitions for all interfaces and components. All types are exported from the main module:
-
-```typescript
-import {
-  LLMAgent,
-  AgentCapability,
-  ExecutionPlan,
-  Workflow,
-  Task,
-  Planner,
-  buildGraphFromPlan,
-  // ... all other types
-} from 'dynamic-agent-framework';
+// Add to worker pool
+const workerPool = new WorkerPool()
+workerPool.addWorker(browserWorker)
+workerPool.addWorker(codeWorker)
 ```
 
 ## Design Philosophy
 
-### Modularity
+### Stream-First Architecture
+All agent execution is streaming by default, enabling real-time feedback and interactive experiences.
 
-The framework is designed with modularity at its core. Agents are composed of discrete capabilities, and workflows are dynamically generated from reusable task patterns.
+### Composable by Design
+Agents can call other agents recursively, workflows can embed sub-workflows, and components are designed for maximum reusability.
 
-### Type Safety
+### Resource-Aware Execution
+Workers are explicitly bound to resources, enabling proper resource management, scheduling, and isolation.
 
-Full TypeScript support ensures type safety throughout the system, catching errors at compile time and providing excellent developer experience with IDE support.
+### Type Safety First
+Comprehensive TypeScript types ensure compile-time safety and excellent developer experience.
 
-### Dynamic Planning
+### Event-Driven Communication
+Bidirectional event channels enable complex interactions like tool calls, human-in-the-loop, and agent coordination.
 
-Unlike fixed workflow systems, this framework generates execution plans dynamically based on user goals and available capabilities, enabling flexible and adaptive behavior.
+## Documentation
 
-### LangGraph Integration
-
-By leveraging LangGraph for execution, the framework benefits from a mature, battle-tested execution engine while maintaining the flexibility of dynamic planning.
-
-### Simplicity
-
-Focus on the core value proposition - dynamic planning - without over-engineering resource management, optimization, or monitoring systems that can be added later as needed.
+- **[Agent System](./docs/agent.md)** - Core agent interfaces and implementation
+- **[Workflow Engine](./docs/workflow.md)** - Task orchestration and dependencies  
+- **[Worker Management](./docs/worker.md)** - Resource allocation and execution
+- **[Execution System](./docs/execution.md)** - Job management and monitoring
 
 ## Contributing
 
@@ -353,43 +278,3 @@ Contributions are welcome! Please read our contributing guidelines and submit pu
 ## License
 
 MIT License - see LICENSE file for details.
-
-## Roadmap
-
-- [ ] **Enhanced Planning Algorithms** - More sophisticated task generation and dependency analysis
-- [ ] **Visual Graph Editor** - Browser-based workflow design and debugging tools
-- [ ] **Plugin Ecosystem** - Standardized plugin architecture for capabilities
-- [ ] **Multi-Agent Coordination** - Framework for coordinating multiple planning agents
-- [ ] **Performance Analytics** - Basic performance analysis and optimization tools
-- [ ] **WebSocket Support** - Real-time bidirectional communication
-
-## Architecture Decisions
-
-### Why TypeScript?
-
-TypeScript provides compile-time type safety, excellent IDE support, and helps prevent runtime errors in complex agent systems.
-
-### Why Capability-Based Design?
-
-Capability-based design allows for:
-- Modular agent composition
-- Clear separation of concerns
-- Easy testing and mocking
-- Runtime capability introspection
-
-### Why Dynamic Planning?
-
-Dynamic planning enables:
-- Adaptive behavior based on user goals
-- Optimal use of available capabilities
-- Flexible task composition
-- Context-aware execution strategies
-
-### Why LangGraph Integration?
-
-LangGraph integration provides:
-- Battle-tested execution engine
-- Built-in checkpointing and streaming
-- Rich ecosystem of tools and integrations
-- Visual debugging capabilities
-- Mature error handling and recovery
