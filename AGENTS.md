@@ -9,7 +9,7 @@
 - Colocate documentation (*.md) and tests with code, don't put them in different file trees
 
 ### Planing
-- Whenever you come up with a plan, or change the plan, always update ROADMAP.md, put the tasks in a hierarchical structure, id them by numbers and refer to dependencies
+- Whenever you come up with a plan, or change the plan, always update the roadmap.org file (emac org mode format), put the tasks in a hierarchical structure, with enough context but not too much on each, id them by numbers and refer to dependencies
 - Put the tasks in the order of execution and resume from the top most, unchecked task.
 
 ### Making changes
