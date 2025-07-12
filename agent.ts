@@ -1,5 +1,7 @@
 import { Task, TaskResult, Plan, SubTask, Stream, Emiter } from './task'
-import { TaskQueue, DependencyTaskQueue, MessageQueue, InMemoryMessageQueue } from './queue'
+import { TaskQueue, DependencyTaskQueue } from './queue'
+import { Socket } from 'socket.io-client'
+import { Server as SocketIOServer } from 'socket.io'
 
 export type Executor<
   In extends {} = {},
@@ -14,59 +16,90 @@ export type Executor<
 
 export type Channel<In, Out> = Stream<Out> & Emiter<In>
 
-export abstract class Agent implements
-  Channel<Task, TaskResult>
-{
-  private taskQueue: TaskQueue
-  private resultQueue: MessageQueue<TaskResult>
+export interface Agent extends Channel<
+  Task | TaskResult,
+  Task | TaskResult
+> {
+  readonly meta: { type: string }
+  readonly id: string
+}
+
+export class AgentWorker implements Agent {
+  readonly meta: { type: string }
+  readonly id: string
+  
+  private resultEmitter?: (result: Task | TaskResult) => void
   private taskResults = new Map<string, TaskResult>()
-  private running = false
-  public readonly executor: string
 
   constructor(
-    executor: string,
-    taskQueue?: TaskQueue,
-    resultQueue?: MessageQueue<TaskResult>
+    id: string,
+    private executor: Executor,
+    meta: { type: string },
   ) {
+    this.id = id
     this.executor = executor
-    this.taskQueue = taskQueue || new DependencyTaskQueue()
-    this.resultQueue = resultQueue || new InMemoryMessageQueue<TaskResult>()
+    this.meta = meta
   }
 
-  async processTask(task: Task): Promise<TaskResult> {
-    const start = new Date()
-    
-    try {
-      const response = await this.executeTask(task.params)
-      
-      // Check if response is a Plan
-      if (this.isPlan(response)) {
-        await this.executePlan(response)
-        return {
-          result: { data: 'Plan executed' },
-          start,
-          end: new Date(),
-          id: task.id
-        }
-      }
-      
-      return {
-        result: { data: response },
-        start,
-        end: new Date(),
-        id: task.id
-      }
-    } catch (error) {
-      return {
-        result: { error },
-        start,
-        end: new Date(),
-        id: task.id
+  on(listener: (result: Task | TaskResult) => void): void {
+    this.resultEmitter = listener
+  }
+
+  emit(taskOrResult: Task | TaskResult): void {
+    if (this.isTask(taskOrResult)) {
+      this.processTask(taskOrResult)
+    } else {
+      // Handle TaskResult - this would be for forwarding results
+      if (this.resultEmitter) {
+        this.resultEmitter(taskOrResult)
       }
     }
   }
 
-  protected abstract executeTask(params: any): Promise<any>
+  private isTask(item: Task | TaskResult): item is Task {
+    return 'executor' in item && 'params' in item
+  }
+
+  async processTask(task: Task): Promise<void> {
+    const start = new Date()
+    
+    try {
+      const response = await this.executor.run(task.params)
+      
+      // Check if response is a Plan
+      if (this.isPlan(response)) {
+        await this.executePlan(response)
+        this.emitResult({
+          result: { data: 'Plan executed' },
+          start,
+          end: new Date(),
+          id: task.id
+        })
+        return
+      }
+      
+      this.emitResult({
+        result: { data: response },
+        start,
+        end: new Date(),
+        id: task.id
+      })
+    } catch (error) {
+      this.emitResult({
+        result: { error },
+        start,
+        end: new Date(),
+        id: task.id
+      })
+    }
+  }
+
+  private emitResult(result: TaskResult): void {
+    this.taskResults.set(result.id, result)
+    if (this.resultEmitter) {
+      this.resultEmitter(result)
+    }
+  }
 
   private isPlan(data: any): data is Plan {
     return typeof data === 'object' && 'subtasks' in data
@@ -94,7 +127,7 @@ export abstract class Agent implements
           }
           
           planQueue.enqueue(resolvedSubtask)
-          this.flushQueueToTaskQueue(planQueue)
+          this.flushQueueToEmit(planQueue)
         } else {
           // Handle nested Plan
           activeStreams++
@@ -117,11 +150,11 @@ export abstract class Agent implements
     })
   }
 
-  private flushQueueToTaskQueue(planQueue: DependencyTaskQueue): void {
+  private flushQueueToEmit(planQueue: DependencyTaskQueue): void {
     while (!planQueue.isEmpty()) {
       const task = planQueue.dequeue()
       if (task) {
-        this.taskQueue.enqueue(task)
+        this.processTask(task)
       }
     }
   }
@@ -143,42 +176,176 @@ export abstract class Agent implements
     return 'executor' in item
   }
 
+  getTaskResult(taskId: string): TaskResult | undefined {
+    return this.taskResults.get(taskId)
+  }
+}
+
+export class AgentProxy implements Agent {
+  readonly meta: { type: string }
+  readonly id: string
+  
+  private socket: Socket
+  private resultEmitter?: (result: Task | TaskResult) => void
+
+  constructor(id: string, meta: { type: string }, socket: Socket) {
+    this.id = id
+    this.meta = meta
+    this.socket = socket
+    
+    this.setupSocketListeners()
+  }
+
+  private setupSocketListeners(): void {
+    // Listen for results from the worker
+    this.socket.on('task-result', (result: TaskResult) => {
+      if (this.resultEmitter) {
+        this.resultEmitter(result)
+      }
+    })
+    
+    // Listen for tasks from the worker (if worker needs to emit tasks)
+    this.socket.on('task', (task: Task) => {
+      if (this.resultEmitter) {
+        this.resultEmitter(task)
+      }
+    })
+  }
+
+  on(listener: (result: Task | TaskResult) => void): void {
+    this.resultEmitter = listener
+  }
+
+  emit(taskOrResult: Task | TaskResult): void {
+    if (this.isTask(taskOrResult)) {
+      // Send task to worker
+      this.socket.emit('task', taskOrResult)
+    } else {
+      // Send result to worker (if needed)
+      this.socket.emit('task-result', taskOrResult)
+    }
+  }
+
+  private isTask(item: Task | TaskResult): item is Task {
+    return 'executor' in item && 'params' in item
+  }
+}
+
+export class Supervisor {
+  private router: Router
+  private io: SocketIOServer
+  private agentProxies = new Map<string, AgentProxy>()
+
+  constructor(router: Router, io: SocketIOServer) {
+    this.router = router
+    this.io = io
+    
+    this.setupConnectionHandlers()
+  }
+
+  private setupConnectionHandlers(): void {
+    this.io.on('connection', (socket) => {
+      console.log('Worker connected:', socket.id)
+      
+      // Listen for worker registration
+      socket.on('register-worker', (workerInfo: { id: string, meta: { type: string } }) => {
+        console.log('Registering worker:', workerInfo)
+        
+        // Create AgentProxy for this worker
+        const agentProxy = new AgentProxy(workerInfo.id, workerInfo.meta, socket)
+        
+        // Store the proxy
+        this.agentProxies.set(workerInfo.id, agentProxy)
+        
+        // Register with router
+        this.router.registerAgent(agentProxy)
+        
+        // Acknowledge registration
+        socket.emit('registration-ack', { success: true })
+      })
+      
+      socket.on('disconnect', () => {
+        console.log('Worker disconnected:', socket.id)
+        // TODO: Clean up agent proxy and unregister from router
+      })
+    })
+  }
+
+  getAgentProxy(id: string): AgentProxy | undefined {
+    return this.agentProxies.get(id)
+  }
+}
+
+export class Router {
+  private agents = new Map<string, Agent>()
+  private taskQueue: TaskQueue
+  private taskResults = new Map<string, TaskResult>()
+  private resultEmitter?: (result: TaskResult) => void
+
+  constructor(taskQueue?: TaskQueue) {
+    this.taskQueue = taskQueue || new DependencyTaskQueue()
+  }
+
+  registerAgent(agent: Agent): void {
+    this.agents.set(agent.meta.type, agent)
+    
+    // Set up result listener
+    agent.on((taskOrResult: Task | TaskResult) => {
+      if (this.isTaskResult(taskOrResult)) {
+        this.taskResults.set(taskOrResult.id, taskOrResult)
+        
+        // Mark as completed in task queue if it's a dependency queue
+        if (this.taskQueue instanceof DependencyTaskQueue) {
+          this.taskQueue.markCompleted(taskOrResult.id)
+        }
+        
+        // Emit result to router listeners
+        if (this.resultEmitter) {
+          this.resultEmitter(taskOrResult)
+        }
+      }
+      // Handle tasks if needed (for plan execution, etc.)
+    })
+  }
+
+  private isTaskResult(item: Task | TaskResult): item is TaskResult {
+    return 'result' in item && 'start' in item && 'end' in item
+  }
+
+  onResult(listener: (result: TaskResult) => void): void {
+    this.resultEmitter = listener
+  }
+
   enqueueTask(task: Task): void {
     this.taskQueue.enqueue(task)
+    this.processNextTask()
   }
 
-  dequeueTask(): Task | undefined {
-    return this.taskQueue.dequeue()
-  }
+  private processNextTask(): void {
+    const task = this.taskQueue.dequeue()
+    if (!task) return
 
-  peekNextTask(): Task | undefined {
-    return this.taskQueue.peek()
-  }
-
-  recordTaskResult(result: TaskResult): void {
-    this.taskResults.set(result.id, result)
-    this.resultQueue.enqueue(result)
-    
-    // Mark as completed in task queue if it's a dependency queue
-    if (this.taskQueue instanceof DependencyTaskQueue) {
-      this.taskQueue.markCompleted(result.id)
+    const agent = this.agents.get(task.executor)
+    if (!agent) {
+      const error = new Error(`No agent found for executor: ${task.executor}`)
+      const result: TaskResult = {
+        result: { error },
+        start: new Date(),
+        end: new Date(),
+        id: task.id
+      }
+      this.taskResults.set(task.id, result)
+      if (this.resultEmitter) {
+        this.resultEmitter(result)
+      }
+      return
     }
+
+    agent.emit(task)
   }
 
   getTaskResult(taskId: string): TaskResult | undefined {
     return this.taskResults.get(taskId)
-  }
-
-  getNextResult(): TaskResult | undefined {
-    return this.resultQueue.dequeue()
-  }
-
-  peekNextResult(): TaskResult | undefined {
-    return this.resultQueue.peek()
-  }
-
-  getResultQueueSize(): number {
-    return this.resultQueue.size()
   }
 
   getTaskQueueSize(): number {

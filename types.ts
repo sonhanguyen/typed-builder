@@ -1,4 +1,3 @@
-
 export type Result<T = unknown> = 
   | { error?: never; result: T }
   | { error: {} }
@@ -35,10 +34,30 @@ export type Emiter<T> = {
   emit(_: T): void
 }
 
-
 export type Plan = {
   id: string
   // the design is intentionally for plan to be dynamic and
   // potentially not deterministic at the start of execution
   subtasks: Stream<SubTask | Plan>
+}
+
+export type Channel<In, Out> = Stream<Out> & Emiter<In>
+
+export interface Agent extends Channel<
+  Task | TaskResult,
+  Task | TaskResult
+> {
+  readonly meta: { type: string }
+  readonly id: string
+}
+
+export type Executor<
+  In extends {} = {},
+  Out = any,
+  Event extends Task | Plan = Task | Plan,
+  Signal extends TaskResult = TaskResult,
+> = {
+  type: string
+  run(_: In): Promise<Out>
+    & Partial<Channel<Signal, Event>>
 }
